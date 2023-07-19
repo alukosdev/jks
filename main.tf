@@ -47,13 +47,13 @@ resource "aws_efs_file_system" "jenkins_efs" {
 resource "aws_efs_mount_target" "jenkins_efs_target1" {
     file_system_id = aws_efs_file_system.jenkins_efs.id
     subnet_id = aws_subnet.private_subnet1.id
-    security_groups = [aws_security_group.efs_from_eks_ingress.id]
+    security_groups = [aws_security_group.ingress_allow_efs_from_eks.id]
 }
 
 resource "aws_efs_mount_target" "jenkins_efs_target2" {
     file_system_id = aws_efs_file_system.jenkins_efs.id
     subnet_id = aws_subnet.private_subnet2.id
-    security_groups = [aws_security_group.efs_from_eks_ingress.id]
+    security_groups = [aws_security_group.ingress_allow_efs_from_eks.id]
 }
 
 # Set permissions to the EFS volume.
@@ -89,8 +89,8 @@ resource "aws_instance" "compute1" {
     subnet_id = aws_subnet.public_subnet1.id
     vpc_security_group_ids = [
         aws_security_group.ingress_allow_ssh_from_bastion.id,
-        aws_security_group.compute-to-www-https.id,
-        aws_security_group.private-ssh-to-compute.id
+        aws_security_group.egress_allow_https_to_www.id,
+        aws_security_group.ingress_allow_ssh_from_personal.id
     ]
     key_name = aws_key_pair.compute1_ssh_key_pair.key_name
 
@@ -125,8 +125,8 @@ resource "aws_instance" "bastion1" {
     subnet_id = aws_subnet.public_subnet1.id
     vpc_security_group_ids = [
         aws_security_group.egress_allow_ssh_to_mongodb.id,
-        aws_security_group.external-ssh-to-bastion.id,
-        aws_security_group.bastion-to-www-https.id
+        aws_security_group.ingress_allow_ssh_from_personal.id,
+        aws_security_group.egress_allow_https_to_www.id
     ]
     key_name = aws_key_pair.ssh_key.key_name
     iam_instance_profile = aws_iam_instance_profile.bastion_profile.name
@@ -181,7 +181,7 @@ data "aws_iam_policy_document" "bucket1_makepub_poldoc" {
     }
 }
 
-data "aws_iam_policy_document" "eks_assumerole_poldoc" {
+data "aws_iam_policy_document" "eks_assumerole" {
     statement {
         effect = "Allow"
 
@@ -198,7 +198,7 @@ data "aws_eks_cluster_auth" "cluster1-auth" {
     name = aws_eks_cluster.cluster1.name
 }
 
-# Allow only the MongoDB isntance permissions to create/terminate other EC2 instances. Only allow this behavior from the EC2 service.
+# Allow only the MongoDB instance permissions to create/terminate other EC2 instances. Only allow this behavior from the EC2 service.
 data "aws_iam_policy_document" "ec2_mgmt_poldoc" {
     statement {
         effect = "Allow"
@@ -223,7 +223,7 @@ data "aws_iam_policy_document" "ec2_mgmt_poldoc" {
 }
 
 # Create policy document to allow assuming EC2 for node group management.
-data "aws_iam_policy_document" "assume_ec2" {
+data "aws_iam_policy_document" "ec2_assumerole" {
     statement {
         effect = "Allow"
 
@@ -402,31 +402,24 @@ resource "aws_eks_node_group" "eks_ng1" {
 
 # SECURITY GROUPS
 
+# Allow egress HTTPS to everywhere.
+resource "aws_security_group" "egress_allow_https_to_www" {
+    name = "egress-https-to-www"
+    description = "Allow egress HTTPS to everywhere."
+    vpc_id = aws_vpc.vpc1.id
+}
+
+# Allow ingress SSH from personal IP address.
+resource "aws_security_group" "ingress_allow_ssh_from_personal" {
+    name = "ingress-allow-ssh-from-personal"
+    description = "Allow ingress SSH from personal IP address."
+    vpc_id = aws_vpc.vpc1.id
+}
+
 # Allow ingress SSH into MongoDB instance from bastion instance.
 resource "aws_security_group" "ingress_allow_ssh_from_bastion" {
     name = "ingress-allow-ssh-from-bastion"
     description = "Allow ingress SSH from bastion instance."
-    vpc_id = aws_vpc.vpc1.id
-}
-
-# Allow ingress SSH to MongoDB instance from personal IP address.
-resource "aws_security_group" "private-ssh-to-compute" {
-    name = "ingress-allow-ssh-from-personal"
-    description = "Allow ingress SSH from personal machine."
-    vpc_id = aws_vpc.vpc1.id
-}
-
-# Allow egress web access from MongoDB instance to download MongoDB and to upload backups to S3.
-resource "aws_security_group" "compute-to-www-https" {
-    name = "allow-https-for-compute"
-    description = "Allow HTTPS to the world."
-    vpc_id = aws_vpc.vpc1.id
-}
-
-# Allow egress web access from bastion instance to obtain AWS Secrets Manager secrets.
-resource "aws_security_group" "bastion-to-www-https" {
-    name = "allow-https-for-bastion"
-    description = "Allow HTTPS to the world."
     vpc_id = aws_vpc.vpc1.id
 }
 
@@ -437,15 +430,8 @@ resource "aws_security_group" "egress_allow_ssh_to_mongodb" {
     vpc_id = aws_vpc.vpc1.id
 }
 
-# Allow ingress SSH into bastion instance from select sources.
-resource "aws_security_group" "external-ssh-to-bastion" {
-    name = "ingress-allow-ssh-to-bastion"
-    description = "Allow ingress SSH into bastion instance."
-    vpc_id = aws_vpc.vpc1.id
-}
-
 # Allow ingress NFS traffic so EKS can use scalable and persistent storage.
-resource "aws_security_group" "efs_from_eks_ingress" {
+resource "aws_security_group" "ingress_allow_efs_from_eks" {
     name = "efs-from-eks-ingress"
     description = "Allow ingress EFS for EKS."
     vpc_id = aws_vpc.vpc1.id
@@ -453,12 +439,12 @@ resource "aws_security_group" "efs_from_eks_ingress" {
 
 # SECURITY GROUP RULES
 
-resource "aws_security_group_rule" "efs" {
+resource "aws_security_group_rule" "ingress_allow_efs_from_eks" {
     type = var.security_group_rule_type[0]
     from_port = var.nfs_port
     to_port = var.nfs_port
     protocol = var.network_protocol[0]
-    security_group_id = aws_security_group.efs_from_eks_ingress.id
+    security_group_id = aws_security_group.ingress_allow_efs_from_eks.id
     cidr_blocks = [var.vpc_cidr_block]
 }
 
@@ -472,21 +458,13 @@ resource "aws_security_group_rule" "ingress_allow_ssh_from_bastion" {
     source_security_group_id = aws_security_group.egress_allow_ssh_to_mongodb.id
 }
 
-resource "aws_security_group_rule" "compute-to-www-https" {
+resource "aws_security_group_rule" "egress_allow_https_to_www" {
+    description = "Allow egress HTTPS to everywhere."
     type = var.security_group_rule_type[1]
     from_port = var.https_port
     to_port = var.https_port
     protocol = var.network_protocol[0]
-    security_group_id = aws_security_group.compute-to-www-https.id
-    cidr_blocks = [var.everyone_network]
-}
-
-resource "aws_security_group_rule" "bastion-to-www-https" {
-    type = var.security_group_rule_type[1]
-    from_port = var.https_port
-    to_port = var.https_port
-    protocol = var.network_protocol[0]
-    security_group_id = aws_security_group.bastion-to-www-https.id
+    security_group_id = aws_security_group.egress_allow_https_to_www.id
     cidr_blocks = [var.everyone_network]
 }
 
@@ -500,50 +478,44 @@ resource "aws_security_group_rule" "egress_allow_ssh_to_mongodb" {
     source_security_group_id = aws_security_group.ingress_allow_ssh_from_bastion.id
 }
 
-resource "aws_security_group_rule" "private-ssh-to-compute" {
+resource "aws_security_group_rule" "ingress_allow_ssh_from_personal" {
+    description = "Allow ingress SSH from personal IP address."
     type = var.security_group_rule_type[0]
     from_port = var.ssh_port
     to_port = var.ssh_port
     protocol = var.network_protocol[0]
-    security_group_id = aws_security_group.private-ssh-to-compute.id
-    cidr_blocks = [var.personal_network]
-}
-
-resource "aws_security_group_rule" "external-ssh-to-bastion" {
-    type = var.security_group_rule_type[0]
-    from_port = var.ssh_port
-    to_port = var.ssh_port
-    protocol = var.network_protocol[0]
-    security_group_id = aws_security_group.external-ssh-to-bastion.id
+    security_group_id = aws_security_group.ingress_allow_ssh_from_personal.id
     cidr_blocks = [var.personal_network]
 }
 
 # IAM ROLES
 
 # Role used for EKS cluster.
+# Allows EKS to assume and perform necessary cluster management operations.
 resource "aws_iam_role" "eks_assume_role" {
     name = "eks-assume-role"
-    assume_role_policy = data.aws_iam_policy_document.eks_assumerole_poldoc.json
+    assume_role_policy = data.aws_iam_policy_document.eks_assumerole.json
 }
 
 # Role used for EKS node group.
+# Allows EC2 to assume and perform necessary node group management operations and use EFS.
 resource "aws_iam_role" "eks_node_group_role" {
     name = "eks-node-group-role"
-    assume_role_policy = data.aws_iam_policy_document.assume_ec2.json
+    assume_role_policy = data.aws_iam_policy_document.ec2_assumerole.json
 }
 
 # Role used for MongoDB EC2 instance profile.
-# Allows EC2 or S3 to assume and perform privileged EC2 operations or put objects  
+# Allows EC2 to assume and perform privileged EC2 operations.
 resource "aws_iam_role" "ec2_management_role" {
     name = "ec2-mgmt-role"
-    assume_role_policy = data.aws_iam_policy_document.assume_ec2_and_s3.json
+    assume_role_policy = data.aws_iam_policy_document.ec2_assumerole.json
 }
 
 # Role used for bastion EC2 instance profile.
 # Allows EC2 to assume and get specific secret from AWS Secrets Manager.
 resource "aws_iam_role" "bastion_role" {
     name = "bastion-role"
-    assume_role_policy = data.aws_iam_policy_document.assume_ec2.json
+    assume_role_policy = data.aws_iam_policy_document.ec2_assumerole.json
 }
 
 # IAM ROLE POLICY ATTACHMENTS
