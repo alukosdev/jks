@@ -137,7 +137,7 @@ resource "aws_instance" "bastion1" {
     }
 }
 
-# POLICIES
+# S3
 
 # Allow public access to the bucket.
 resource "aws_s3_bucket_public_access_block" "bucket1_makepub_config" {
@@ -218,27 +218,6 @@ data "aws_iam_policy_document" "ec2_mgmt_poldoc" {
             test = "StringEquals"
             variable = "aws:PrincipalService"
             values = ["ec2.amazonaws.com"]
-        }
-    }
-}
-
-# Allow the MongoDB instance permissions to put objects in the backup bucket. Only allow this behavior from the S3 service for extra security.
-data "aws_iam_policy_document" "mongodb_s3_access_poldoc" {
-    statement {
-        effect = "Allow"
-        actions = ["s3:PutObject"]
-        resources = ["${aws_s3_bucket.bucket1.arn}/*"]
-
-        condition {
-            test = "StringEquals"
-            variable = "ec2:SourceInstanceARN"
-            values = [aws_instance.compute1.arn]
-        }
-
-        condition {
-            test = "StringEquals"
-            variable = "aws:PrincipalService"
-            values = ["s3.amazonaws.com"]
         }
     }
 }
@@ -541,21 +520,27 @@ resource "aws_security_group_rule" "external-ssh-to-bastion" {
 
 # IAM ROLES
 
+# Role used for EKS cluster.
 resource "aws_iam_role" "eks_assume_role" {
     name = "eks-assume-role"
     assume_role_policy = data.aws_iam_policy_document.eks_assumerole_poldoc.json
 }
 
+# Role used for EKS node group.
 resource "aws_iam_role" "eks_node_group_role" {
     name = "eks-node-group-role"
     assume_role_policy = data.aws_iam_policy_document.assume_ec2.json
 }
 
+# Role used for MongoDB EC2 instance profile.
+# Allows EC2 or S3 to assume and perform privileged EC2 operations or put objects  
 resource "aws_iam_role" "ec2_management_role" {
     name = "ec2-mgmt-role"
     assume_role_policy = data.aws_iam_policy_document.assume_ec2_and_s3.json
 }
 
+# Role used for bastion EC2 instance profile.
+# Allows EC2 to assume and get specific secret from AWS Secrets Manager.
 resource "aws_iam_role" "bastion_role" {
     name = "bastion-role"
     assume_role_policy = data.aws_iam_policy_document.assume_ec2.json
@@ -606,16 +591,13 @@ resource "aws_iam_role_policy_attachment" "ec2_management_role_attachment" {
 
 # IAM POLICIES
 
+# Allow MongoDB instance permission to perform privileged EC2 operations.
 resource "aws_iam_policy" "ec2_management_policy" {
     name = "ec2-mgmt-policy"
     policy = data.aws_iam_policy_document.ec2_mgmt_poldoc.json
 }
 
-resource "aws_iam_policy" "mongodb_s3_access_policy" {
-    name = "mongodb-s3-policy"
-    policy = data.aws_iam_policy_document.mongodb_s3_access_poldoc.json
-}
-
+# Allow bastion instance to get specific secret from AWS Secrets Manager.
 resource "aws_iam_policy" "bastion_role_policy" {
     name = "bastion-role-policy"
     policy = data.aws_iam_policy_document.bastion_role_poldoc.json
