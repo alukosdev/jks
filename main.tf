@@ -67,14 +67,18 @@ resource "aws_efs_mount_target" "jenkins_efs_target2" {
 # Set permissions to the EFS volume.
 resource "aws_efs_access_point" "jenkins_efs_ap1" {
     file_system_id = aws_efs_file_system.jenkins_efs.id
+
+    # Operating system user and group applied to all file system requests made using the access point.
     posix_user {
         uid = 1000
         gid = 1000
     }
 
+    # Directory on the Amazon EFS file system that the access point provides access to.
     root_directory {
         path = "/jenkins"
 
+        # Create the user and group that will be making requests and assign permissions.
         creation_info {
             owner_uid = 1000
             owner_gid = 1000
@@ -456,22 +460,6 @@ resource "aws_security_group" "external-ssh-to-bastion" {
     name = "ingress-allow-ssh-to-bastion"
     description = "Allow ingress SSH into bastion instance."
     vpc_id = aws_vpc.vpc1.id
-}
-
-# Allow MongoDB connections into MongoDB VM.
-resource "aws_security_group" "ingress_mongodb_connection" {
-    name = "ingress-mongodb-connection"
-    description = "Allow ingress MongoDB into MongoDB instance."
-    vpc_id = aws_vpc.vpc1.id
-}
-
-resource "aws_security_group_rule" "mongodb" {
-    type = var.security_group_rule_type[0]
-    from_port = var.mongodb_port
-    to_port = var.mongodb_port
-    protocol = var.network_protocol[0]
-    security_group_id = aws_security_group.ingress_mongodb_connection.id
-    cidr_blocks = [var.vpc_cidr_block]
 }
 
 # Allow ingress NFS traffic so EKS can use scalable and persistent storage.

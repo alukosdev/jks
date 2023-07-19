@@ -76,13 +76,6 @@ variable "nfs_port" {
     default = 2049
 }
 
-variable "mongodb_port" {
-    type = number
-    description = "Port used for NFS."
-    default = 27017
-}
-
-
 variable "personal_network" {
     type = string
     description = "Personal home network address(es)."
