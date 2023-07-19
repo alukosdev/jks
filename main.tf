@@ -18,14 +18,6 @@ provider "aws" {
     }
 }
 
-# Use the Kubernetes Terraform provider for adjusting container permissions.
-# REMOVEME
-provider "kubernetes" {
-    host = aws_eks_cluster.cluster1.endpoint
-    cluster_ca_certificate = base64decode(aws_eks_cluster.cluster1.certificate_authority.0.data)
-    token = data.aws_eks_cluster_auth.cluster1-auth.token
-}
-
 ####################
 # RESOURCES
 ####################
