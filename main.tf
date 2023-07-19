@@ -88,7 +88,7 @@ resource "aws_instance" "compute1" {
     instance_type = "t3.micro"
     subnet_id = aws_subnet.public_subnet1.id
     vpc_security_group_ids = [
-        aws_security_group.compute-from-bastion-ssh.id,
+        aws_security_group.ingress_allow_ssh_from_bastion.id,
         aws_security_group.compute-to-www-https.id,
         aws_security_group.private-ssh-to-compute.id
     ]
@@ -124,7 +124,7 @@ resource "aws_instance" "bastion1" {
     instance_type = "t3.micro"
     subnet_id = aws_subnet.public_subnet1.id
     vpc_security_group_ids = [
-        aws_security_group.bastion-to-compute-ssh.id,
+        aws_security_group.egress_allow_ssh_to_mongodb.id,
         aws_security_group.external-ssh-to-bastion.id,
         aws_security_group.bastion-to-www-https.id
     ]
@@ -170,7 +170,7 @@ data "aws_iam_policy_document" "bucket1_makepub_poldoc" {
         }
     }
 
-    # Allow role attached to MongoDB VM to put objects in S3 bucket.
+    # Allow role attached to MongoDB instance to put objects in S3 bucket.
     statement {
         actions = ["s3:PutObject"]
         resources = ["${aws_s3_bucket.bucket1.arn}/*"]
@@ -198,7 +198,7 @@ data "aws_eks_cluster_auth" "cluster1-auth" {
     name = aws_eks_cluster.cluster1.name
 }
 
-# Allow only the MongoDB VM permissions to create/terminate other EC2 instances. Only allow this behavior from the EC2 service.
+# Allow only the MongoDB isntance permissions to create/terminate other EC2 instances. Only allow this behavior from the EC2 service.
 data "aws_iam_policy_document" "ec2_mgmt_poldoc" {
     statement {
         effect = "Allow"
@@ -222,7 +222,7 @@ data "aws_iam_policy_document" "ec2_mgmt_poldoc" {
     }
 }
 
-# Allow the MongoDB VM permissions to put objects in the backup bucket. Only allow this behavior from the S3 service for extra security.
+# Allow the MongoDB instance permissions to put objects in the backup bucket. Only allow this behavior from the S3 service for extra security.
 data "aws_iam_policy_document" "mongodb_s3_access_poldoc" {
     statement {
         effect = "Allow"
@@ -277,11 +277,13 @@ data "aws_iam_policy_document" "bastion_role_poldoc" {
     }
 }
 
-# NETWORKING
+# VPCS
 
 resource "aws_vpc" "vpc1" {
     cidr_block = var.vpc_cidr_block
 }
+
+# SUBNETS
 
 resource "aws_subnet" "public_subnet1" {
     cidr_block = var.vpc_subnet_cidr_block[0]
@@ -311,6 +313,8 @@ resource "aws_subnet" "private_subnet2" {
     map_public_ip_on_launch = false
 }
 
+# GATEWAYS
+
 resource "aws_internet_gateway" "igw1" {
     vpc_id = aws_vpc.vpc1.id
 }
@@ -320,8 +324,21 @@ resource "aws_nat_gateway" "ngw1" {
     subnet_id = aws_subnet.public_subnet1.id
 }
 
+# EIPS
+
 resource "aws_eip" "ngw_ip" {
     domain = "vpc"
+}
+
+# ROUTE TABLES
+
+resource "aws_route_table" "rtb1" {
+    vpc_id = aws_vpc.vpc1.id
+
+    route {
+        cidr_block = var.everyone_network
+        gateway_id = aws_internet_gateway.igw1.id
+    }
 }
 
 resource "aws_route_table" "rtb2" {
@@ -333,23 +350,7 @@ resource "aws_route_table" "rtb2" {
     }
 }
 
-resource "aws_route_table_association" "priv_rta1" {
-    subnet_id = aws_subnet.private_subnet1.id
-    route_table_id = aws_route_table.rtb2.id
-}
-
-resource "aws_route_table_association" "priv_rta2" {
-    subnet_id = aws_subnet.private_subnet2.id
-    route_table_id = aws_route_table.rtb2.id
-}
-
-resource "aws_route_table" "rtb1" {
-    vpc_id = aws_vpc.vpc1.id
-    route {
-        cidr_block = var.everyone_network
-        gateway_id = aws_internet_gateway.igw1.id
-    }
-}
+# ROUTE TABLE ASSOCIATIONS
 
 resource "aws_route_table_association" "rta_public_subnet1" {
     subnet_id = aws_subnet.public_subnet1.id
@@ -359,6 +360,16 @@ resource "aws_route_table_association" "rta_public_subnet1" {
 resource "aws_route_table_association" "rta_public_subnet2" {
     subnet_id = aws_subnet.public_subnet2.id
     route_table_id = aws_route_table.rtb1.id
+}
+
+resource "aws_route_table_association" "priv_rta1" {
+    subnet_id = aws_subnet.private_subnet1.id
+    route_table_id = aws_route_table.rtb2.id
+}
+
+resource "aws_route_table_association" "priv_rta2" {
+    subnet_id = aws_subnet.private_subnet2.id
+    route_table_id = aws_route_table.rtb2.id
 }
 
 # EKS
@@ -412,41 +423,42 @@ resource "aws_eks_node_group" "eks_ng1" {
 
 # SECURITY GROUPS
 
-# Allow ingress SSH into MongoDB VM.
-resource "aws_security_group" "compute-from-bastion-ssh" {
+# Allow ingress SSH into MongoDB instance from bastion instance.
+resource "aws_security_group" "ingress_allow_ssh_from_bastion" {
     name = "ingress-allow-ssh-from-bastion"
     description = "Allow ingress SSH from bastion instance."
     vpc_id = aws_vpc.vpc1.id
 }
 
+# Allow ingress SSH to MongoDB instance from personal IP address.
 resource "aws_security_group" "private-ssh-to-compute" {
-    name = "ingress-ssh-from-personal"
+    name = "ingress-allow-ssh-from-personal"
     description = "Allow ingress SSH from personal machine."
     vpc_id = aws_vpc.vpc1.id
 }
 
-# Allow egress web access from MongoDB VM to download MongoDB and to upload backups to S3.
+# Allow egress web access from MongoDB instance to download MongoDB and to upload backups to S3.
 resource "aws_security_group" "compute-to-www-https" {
     name = "allow-https-for-compute"
     description = "Allow HTTPS to the world."
     vpc_id = aws_vpc.vpc1.id
 }
 
-# Allow egress web access from bastion VM to obtain AWS Secrets Manager secrets.
+# Allow egress web access from bastion instance to obtain AWS Secrets Manager secrets.
 resource "aws_security_group" "bastion-to-www-https" {
     name = "allow-https-for-bastion"
     description = "Allow HTTPS to the world."
     vpc_id = aws_vpc.vpc1.id
 }
 
-# Allow egress SSH from bastion VM to SSH into MongoDB VM.
-resource "aws_security_group" "bastion-to-compute-ssh" {
-    name = "egress-allow-ssh-to-compute"
+# Allow egress SSH from bastion instance to SSH into MongoDB instance.
+resource "aws_security_group" "egress_allow_ssh_to_mongodb" {
+    name = "egress-allow-ssh-to-mongodb"
     description = "Allow egress SSH into MongoDB instance."
     vpc_id = aws_vpc.vpc1.id
 }
 
-# Allow ingress SSH into bastion VM from select sources.
+# Allow ingress SSH into bastion instance from select sources.
 resource "aws_security_group" "external-ssh-to-bastion" {
     name = "ingress-allow-ssh-to-bastion"
     description = "Allow ingress SSH into bastion instance."
@@ -460,6 +472,8 @@ resource "aws_security_group" "efs_from_eks_ingress" {
     vpc_id = aws_vpc.vpc1.id
 }
 
+# SECURITY GROUP RULES
+
 resource "aws_security_group_rule" "efs" {
     type = var.security_group_rule_type[0]
     from_port = var.nfs_port
@@ -469,16 +483,14 @@ resource "aws_security_group_rule" "efs" {
     cidr_blocks = [var.vpc_cidr_block]
 }
 
-# SECURITY GROUP RULES
-
-# Allow SSH access from bastion host for performing backups.
-resource "aws_security_group_rule" "compute-from-bastion-ssh" {
+resource "aws_security_group_rule" "ingress_allow_ssh_from_bastion" {
+    description = "Allow ingress SSH from bastion instance."
     type = var.security_group_rule_type[0]
     from_port = var.ssh_port
     to_port = var.ssh_port
     protocol = var.network_protocol[0]
-    security_group_id = aws_security_group.compute-from-bastion-ssh.id
-    source_security_group_id = aws_security_group.bastion-to-compute-ssh.id
+    security_group_id = aws_security_group.ingress_allow_ssh_from_bastion.id
+    source_security_group_id = aws_security_group.egress_allow_ssh_to_mongodb.id
 }
 
 resource "aws_security_group_rule" "compute-to-www-https" {
@@ -499,13 +511,14 @@ resource "aws_security_group_rule" "bastion-to-www-https" {
     cidr_blocks = [var.everyone_network]
 }
 
-resource "aws_security_group_rule" "bastion-to-compute-ssh" {
+resource "aws_security_group_rule" "egress_allow_ssh_to_mongodb" {
+    description = "Allow egress SSH to MongoDB instance."
     type = var.security_group_rule_type[1]
     from_port = var.ssh_port
     to_port = var.ssh_port
     protocol = var.network_protocol[0]
-    security_group_id = aws_security_group.bastion-to-compute-ssh.id
-    source_security_group_id = aws_security_group.compute-from-bastion-ssh.id
+    security_group_id = aws_security_group.egress_allow_ssh_to_mongodb.id
+    source_security_group_id = aws_security_group.ingress_allow_ssh_from_bastion.id
 }
 
 resource "aws_security_group_rule" "private-ssh-to-compute" {
@@ -517,7 +530,6 @@ resource "aws_security_group_rule" "private-ssh-to-compute" {
     cidr_blocks = [var.personal_network]
 }
 
-# Allow management of bastion host to configure MongoDB backups.
 resource "aws_security_group_rule" "external-ssh-to-bastion" {
     type = var.security_group_rule_type[0]
     from_port = var.ssh_port
@@ -527,12 +539,29 @@ resource "aws_security_group_rule" "external-ssh-to-bastion" {
     cidr_blocks = [var.personal_network]
 }
 
-# IAM
+# IAM ROLES
 
 resource "aws_iam_role" "eks_assume_role" {
     name = "eks-assume-role"
     assume_role_policy = data.aws_iam_policy_document.eks_assumerole_poldoc.json
 }
+
+resource "aws_iam_role" "eks_node_group_role" {
+    name = "eks-node-group-role"
+    assume_role_policy = data.aws_iam_policy_document.assume_ec2.json
+}
+
+resource "aws_iam_role" "ec2_management_role" {
+    name = "ec2-mgmt-role"
+    assume_role_policy = data.aws_iam_policy_document.assume_ec2_and_s3.json
+}
+
+resource "aws_iam_role" "bastion_role" {
+    name = "bastion-role"
+    assume_role_policy = data.aws_iam_policy_document.assume_ec2.json
+}
+
+# IAM ROLE POLICY ATTACHMENTS
 
 resource "aws_iam_role_policy_attachment" "eks_cluster_policy_attachment" {
     policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
@@ -542,11 +571,6 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy_attachment" {
 resource "aws_iam_role_policy_attachment" "eks_vpc_resource_controller_attachment" {
     policy_arn = "arn:aws:iam::aws:policy/AmazonEKSVPCResourceController"
     role = aws_iam_role.eks_assume_role.name
-}
-
-resource "aws_iam_role" "eks_node_group_role" {
-    name = "eks-node-group-role"
-    assume_role_policy = data.aws_iam_policy_document.assume_ec2.json
 }
 
 # Allow EKS node group to mount EFS volumes.
@@ -570,10 +594,17 @@ resource "aws_iam_role_policy_attachment" "AmazonEC2ContainerRegistryReadOnly" {
     role = aws_iam_role.eks_node_group_role.name
 }
 
-resource "aws_iam_role" "ec2_management_role" {
-    name = "ec2-mgmt-role"
-    assume_role_policy = data.aws_iam_policy_document.assume_ec2_and_s3.json
+resource "aws_iam_role_policy_attachment" "bastion_role_policy_attachment" {
+    role = aws_iam_role.bastion_role.name
+    policy_arn = aws_iam_policy.bastion_role_policy.arn
 }
+
+resource "aws_iam_role_policy_attachment" "ec2_management_role_attachment" {
+    role = aws_iam_role.ec2_management_role.name
+    policy_arn = aws_iam_policy.ec2_management_policy.arn
+}
+
+# IAM POLICIES
 
 resource "aws_iam_policy" "ec2_management_policy" {
     name = "ec2-mgmt-policy"
@@ -585,25 +616,12 @@ resource "aws_iam_policy" "mongodb_s3_access_policy" {
     policy = data.aws_iam_policy_document.mongodb_s3_access_poldoc.json
 }
 
-resource "aws_iam_role" "bastion_role" {
-    name = "bastion-role"
-    assume_role_policy = data.aws_iam_policy_document.assume_ec2.json
-}
-
 resource "aws_iam_policy" "bastion_role_policy" {
     name = "bastion-role-policy"
     policy = data.aws_iam_policy_document.bastion_role_poldoc.json
 }
 
-resource "aws_iam_role_policy_attachment" "bastion_role_policy_attachment" {
-    role = aws_iam_role.bastion_role.name
-    policy_arn = aws_iam_policy.bastion_role_policy.arn
-}
-
-resource "aws_iam_role_policy_attachment" "ec2_management_role_attachment" {
-    role = aws_iam_role.ec2_management_role.name
-    policy_arn = aws_iam_policy.ec2_management_policy.arn
-}
+# IAM INSTANCE PROFILES
 
 resource "aws_iam_instance_profile" "ec2_management_profile" {
     name = "ec2-mgmt-profile"
@@ -615,21 +633,23 @@ resource "aws_iam_instance_profile" "bastion_profile" {
     role = aws_iam_role.bastion_role.name
 }
 
-# KEYS
+# SECRETS
 
-# Creates an AWS Secrets Manager entry for the private key used for the bastion VM to access the MongoDB VM.
+# Creates an AWS Secrets Manager entry for the private key used for the bastion instance to access the MongoDB instance.
 resource "aws_secretsmanager_secret" "compute1_ssh_private_key" {
     # Did not specify a name since this affects destruction/recreation.
 }
 
-# Copy private key for MongoDB VM to AWS Secrets Manager so this can be used to programmatically perform backups.
+# Copy private key for MongoDB instance to AWS Secrets Manager so this can be used to programmatically perform backups.
 resource "aws_secretsmanager_secret_version" "compute1_ssh_private_key_version" {
     secret_id = aws_secretsmanager_secret.compute1_ssh_private_key.id
     # This key was pre-generated, stored locally, and is gitignored.
     secret_string = file("/.ssh/ssh.pem")
 }
 
-# Set the public key for the MongoDB VM using the key pair that I generated locally.
+# KEYS
+
+# Set the public key for the MongoDB instance using the key pair that I generated locally.
 resource "aws_key_pair" "compute1_ssh_key_pair" {
     # This key was pre-generated, stored locally, and is gitignored.
     public_key = file("/.ssh/id_rsa.pub")
