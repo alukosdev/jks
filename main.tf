@@ -90,8 +90,7 @@ resource "aws_instance" "compute1" {
     vpc_security_group_ids = [
         aws_security_group.compute-from-bastion-ssh.id,
         aws_security_group.compute-to-www-https.id,
-        aws_security_group.private-ssh-to-compute.id,
-        aws_security_group.ingress_mongodb_connection.id
+        aws_security_group.private-ssh-to-compute.id
     ]
     key_name = aws_key_pair.compute1_ssh_key_pair.key_name
 
