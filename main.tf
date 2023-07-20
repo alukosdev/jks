@@ -397,6 +397,8 @@ resource "aws_eks_node_group" "eks_ng1" {
 # SECURITY GROUPS
 
 # Allow egress HTTPS to everywhere.
+# For bastion instance, this is required for AWS Secrets Manager.
+# For MongoDB instance, this is required for Amazon S3 and to install MongoDB.
 resource "aws_security_group" "egress_allow_https_to_www" {
     name = "egress-https-to-www"
     description = "Allow egress HTTPS to everywhere."
