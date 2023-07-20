@@ -213,12 +213,6 @@ data "aws_iam_policy_document" "ec2_mgmt_poldoc" {
             variable = "ec2:SourceInstanceARN"
             values = [aws_instance.compute1.arn]
         }
-
-        condition {
-            test = "StringEquals"
-            variable = "aws:PrincipalService"
-            values = ["ec2.amazonaws.com"]
-        }
     }
 }
 
