@@ -426,7 +426,7 @@ resource "aws_security_group" "egress_allow_ssh_to_mongodb" {
 
 # Allow ingress NFS traffic so EKS can use scalable and persistent storage.
 resource "aws_security_group" "ingress_allow_efs_from_eks" {
-    name = "efs-from-eks-ingress"
+    name = "ingress-allow-efs-from-eks"
     description = "Allow ingress EFS for EKS."
     vpc_id = aws_vpc.vpc1.id
 }
