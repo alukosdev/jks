@@ -194,10 +194,6 @@ data "aws_iam_policy_document" "eks_assumerole" {
     }
 }
 
-data "aws_eks_cluster_auth" "cluster1-auth" {
-    name = aws_eks_cluster.cluster1.name
-}
-
 # Allow only the MongoDB instance permissions to create/terminate other EC2 instances. Only allow this behavior from the EC2 service.
 data "aws_iam_policy_document" "ec2_mgmt_poldoc" {
     statement {
@@ -229,25 +225,30 @@ data "aws_iam_policy_document" "ec2_assumerole" {
     }
 }
 
-# Create policy document to allow assuming EC2 for instance management and S3 for putting objects.
-data "aws_iam_policy_document" "assume_ec2_and_s3" {
-    statement {
-        effect = "Allow"
-
-        principals {
-            type = "Service"
-            identifiers = ["ec2.amazonaws.com", "s3.amazonaws.com"]
-        }
-        actions = ["sts:AssumeRole"]
-    }
-}
-
 # Create policy document to allow the bastion host to use AWS Secrets Manager.
 data "aws_iam_policy_document" "bastion_role_poldoc" {
     statement {
         actions = ["secretsmanager:GetSecretValue"]
         resources = [aws_secretsmanager_secret.compute1_ssh_private_key.arn]
     }
+}
+
+# CHECKME Create policy document to allow only Bastion instance profile to retrieve secret.
+data "aws_iam_policy_document" "compute1_ssh_private_key_policy_poldoc" {
+    statement {
+        effect = "Allow"
+        actions = ["secretsmanager:GetSecretValue"]
+        resources = [aws_secretsmanager_secret.compute1_ssh_private_key.arn]
+
+        principals {
+            type = "AWS"
+            identifiers = [aws_iam_role.bastion_role.arn]
+        }
+    }
+}
+
+data "aws_eks_cluster_auth" "cluster1-auth" {
+    name = aws_eks_cluster.cluster1.name
 }
 
 # VPCS
@@ -595,6 +596,12 @@ resource "aws_secretsmanager_secret_version" "compute1_ssh_private_key_version" 
     secret_id = aws_secretsmanager_secret.compute1_ssh_private_key.id
     # This key was pre-generated, stored locally, and is gitignored.
     secret_string = file("/.ssh/ssh.pem")
+}
+
+#THIS IS NEW. CHECKME.
+resource "aws_secretsmanager_secret_policy" "compute1_ssh_private_key_policy" {
+    secret_arn = aws_secretsmanager_secret.compute1_ssh_private_key.arn
+    policy = data.aws_iam_policy_document.compute1_ssh_private_key_policy_poldoc.json
 }
 
 # KEYS
